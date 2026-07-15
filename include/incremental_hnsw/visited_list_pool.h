@@ -40,6 +40,9 @@ namespace hnswlib_incre {
         std::mutex poolguard;
         int numelements;
 
+        // Thread-local cache to reduce mutex contention in multithreaded queries
+        inline static thread_local VisitedList *cached_list = nullptr;
+
     public:
         VisitedListPool(int initmaxpools, int numelements1) {
             numelements = numelements1;
@@ -48,6 +51,15 @@ namespace hnswlib_incre {
         }
 
         VisitedList *getFreeVisitedList() {
+            // Fast path: use cached thread-local list if available
+            if (cached_list != nullptr) {
+                VisitedList *rez = cached_list;
+                cached_list = nullptr;
+                rez->reset();
+                return rez;
+            }
+
+            // Slow path: get from pool (requires locking)
             VisitedList *rez;
             {
                 std::unique_lock <std::mutex> lock(poolguard);
@@ -63,6 +75,13 @@ namespace hnswlib_incre {
         };
 
         void releaseVisitedList(VisitedList *vl) {
+            // Fast path: cache to thread-local storage
+            if (cached_list == nullptr) {
+                cached_list = vl;
+                return;
+            }
+
+            // Slow path: return to pool (requires locking)
             std::unique_lock <std::mutex> lock(poolguard);
             pool.push_front(vl);
         };
@@ -76,4 +95,3 @@ namespace hnswlib_incre {
         };
     };
 }
-

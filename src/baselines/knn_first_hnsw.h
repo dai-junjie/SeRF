@@ -148,12 +148,22 @@ class KnnFirstWrapper : BaseIndex {
     hnsw_index = new hnswlib_incre::HierarchicalNSW<float>(
         space, 2 * data_wrapper->data_size, index_params->K,
         index_params->ef_construction);
+
+    // Multi-threaded index construction (controlled by OMP_NUM_THREADS)
+#ifndef NO_PARALLEL_BUILD
+#pragma omp parallel for
+#endif
     for (size_t i = 0; i < data_wrapper->data_size; ++i) {
       hnsw_index->addPoint(data_wrapper->nodes.at(i).data(), i);
     }
     cout << "Done" << endl;
     index_info->index_time = CountTime(tt1, tt2);
     countNeighbrs();
+  }
+
+  // Thread-safe method to set ef BEFORE multi-threaded queries
+  void setSearchEf(int ef) {
+    hnsw_index->setEf(ef);
   }
 
   vector<int> rangeFilteringSearchInRange(
@@ -170,10 +180,19 @@ class KnnFirstWrapper : BaseIndex {
       const std::pair<int, int> query_bound) override {
     timeval tt1, tt2;
 
-    hnsw_index->search_info = search_info;
+    // Use thread_local storage to avoid mutex contention in multithreaded queries
+    // Each thread has its own search_info pointer, no locking needed!
+    hnsw_index->thread_search_info = search_info;
+
     gettimeofday(&tt1, NULL);
 
-    hnsw_index->setEf(search_params->search_ef);
+    // NOTE: For multi-threaded queries, ef must be set BEFORE thread launch
+    // via setSearchEf() to avoid race conditions. Each thread calling
+    // setEf() simultaneously causes SIGSEGV. For single-threaded use,
+    // setEf is safe here.
+    #ifndef HNSW_MULTITHREAD_BENCHMARK
+      hnsw_index->setEf(search_params->search_ef);
+    #endif
 
     vector<int> result_in_range;
     auto res = hnsw_index->searchKnnCloserFirst(
@@ -189,6 +208,12 @@ class KnnFirstWrapper : BaseIndex {
   }
 
   void saveIndex(const string &save_path) { hnsw_index->saveIndex(save_path); }
+
+  void loadIndex(const string &load_path) {
+    space = new hnswlib_incre::L2Space(data_wrapper->data_dim);
+    hnsw_index = new hnswlib_incre::HierarchicalNSW<float>(space, load_path);
+    countNeighbrs();
+  }
 
   ~KnnFirstWrapper() {
     delete hnsw_index;

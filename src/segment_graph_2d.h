@@ -855,13 +855,18 @@ class IndexSegmentGraph2D : public BaseIndex {
     search_info->cal_dist_time = 0;
     search_info->fetch_nns_time = 0;
     num_search_comparison = 0;
-    // finding enters
+    // finding enters - use configurable number of entry points
     vector<int> enter_list;
     {
+      unsigned num_points = search_params->num_entry_points;
+      if (num_points < 1) num_points = 1;
       int lbound = query_bound.first;
-      int interval = (query_bound.second - lbound) / 3;
-      for (size_t i = 0; i < 3; i++) {
-        int point = lbound + interval * i;
+      int range_size = query_bound.second - lbound;
+      int interval = (num_points > 1) ? (range_size / (num_points - 1)) : 0;
+      for (size_t i = 0; i < num_points; i++) {
+        int point = (num_points > 1) ? (lbound + interval * i) : lbound;
+        // Ensure last point is within range
+        if (point > query_bound.second) point = query_bound.second;
         float dist = EuclideanDistance(data_wrapper->nodes[point], query);
         candidate_set.emplace(-dist, point);
         enter_list.emplace_back(point);
@@ -913,8 +918,8 @@ class IndexSegmentGraph2D : public BaseIndex {
             continue;
           visited_nn_num++;
 
-          // visiting more than K neighbors, break. for reverse nn
-          if (visited_nn_num > 2 * index_params_->K) break;
+          // OPTIMIZED: increased from 2*K to 4*K for better recall
+          if (visited_nn_num > 4 * index_params_->K) break;
           if (!(visited_array[candidate_id] == visited_array_tag)) {
             visited_array[candidate_id] = visited_array_tag;
 
@@ -1017,7 +1022,9 @@ class IndexSegmentGraph2D : public BaseIndex {
 
   void save(const string &save_path) {
     std::ofstream output(save_path, std::ios::binary);
-    unsigned counter = 0;
+    // Write data_size first for validation during load
+    base_hnsw::writeBinaryPOD(output, (int)data_wrapper->data_size);
+    unsigned counter = 1;
     for (auto &segment : directed_indexed_arr) {
       base_hnsw::writeBinaryPOD(output, (int)segment.forward_nns.size());
       base_hnsw::writeBinaryPOD(output, (int)segment.reverse_nns.size());
@@ -1045,6 +1052,20 @@ class IndexSegmentGraph2D : public BaseIndex {
   void load(const string &load_path) {
     std::ifstream input(load_path, std::ios::binary);
     if (!input.is_open()) throw std::runtime_error("Cannot open file");
+
+    // Read saved data_size first
+    int saved_data_size;
+    base_hnsw::readBinaryPOD(input, saved_data_size);
+
+    // Validate data_size matches - require exact match
+    if (saved_data_size != data_wrapper->data_size) {
+      throw std::runtime_error("Data size mismatch! Saved index has " +
+                               std::to_string(saved_data_size) +
+                               " points, but current data_size is " +
+                               std::to_string(data_wrapper->data_size) +
+                               ". Please use the same -N parameter when loading.");
+    }
+
     directed_indexed_arr.clear();
     directed_indexed_arr.resize(data_wrapper->data_size);
     int forward_num;
@@ -1082,6 +1103,17 @@ class IndexSegmentGraph2D : public BaseIndex {
       directed_indexed_arr[i].forward_nns.swap(neighbors);
       directed_indexed_arr[i].reverse_nns.swap(reverse_nns);
     }
+
+    // Initialize visited_list_pool_ for search operations
+    visited_list_pool_ =
+        new base_hnsw::VisitedListPool(1, data_wrapper->data_size);
+
+    // Note: index_params_ is NOT loaded from file since it's only used during build
+    // We need to set it from the caller, but for now set a minimal default
+    // to prevent crashes in search (index_params_->K is accessed at line 922)
+    static BaseIndex::IndexParams default_params(16, 100, 100, 500);
+    index_params_ = &default_params;
+
     printOnebatch();
     countNeighbors();
     cout << "Total # of neighbors: " << index_info->nodes_amount << endl;

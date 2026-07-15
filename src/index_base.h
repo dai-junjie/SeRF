@@ -76,6 +76,7 @@ class BaseIndex {
     unsigned search_ef;
     unsigned query_range;
     float control_batch_threshold = 1;
+    unsigned num_entry_points = 3;  // Number of entry points for search
   };
 
   struct SearchInfo {
@@ -120,7 +121,7 @@ class BaseIndex {
                   data_wrapper->dataset + "-" +
                   std::to_string(data_wrapper->data_size) + ".csv";
 
-      std::cout << "Save result to :" << save_path << std::endl;
+      // std::cout << "Save result to :" << save_path << std::endl;  // Disabled for multi-threaded benchmark
     };
 
     void RecordOneQuery(BaseIndex::SearchParams* search) {

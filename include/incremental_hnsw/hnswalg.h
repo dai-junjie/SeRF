@@ -70,7 +70,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
 
     cur_element_count = 0;
 
-    visited_list_pool_ = new VisitedListPool(1, max_elements);
+    visited_list_pool_ = new VisitedListPool(32, max_elements);
 
     // initializations for special treatment of the first node
     enterpoint_node_ = -1;
@@ -114,8 +114,12 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
   size_t size_data_per_element_;
   size_t size_links_per_element_;
 
-  BaseIndex::SearchInfo *search_info;
-  vector<vector<float>> *nodes;
+  // Use thread_local to avoid race condition in multithreaded queries
+  // Each thread has its own search_info pointer
+  // Using inline to allow definition in header (C++17)
+  inline static thread_local BaseIndex::SearchInfo *thread_search_info = nullptr;
+  BaseIndex::SearchInfo *search_info = nullptr;  // Deprecated: kept for compatibility
+  vector<vector<float>> *nodes = nullptr;
 
   size_t M_;
   size_t maxM_;
@@ -396,7 +400,12 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
     candidate_from_out_bound = 0;
     num_search_comparison = 0;
     decompress_neighbor_time = 0;
-    search_info->cal_dist_time = 0;
+    // Use thread_local search_info for multithreaded queries
+    BaseIndex::SearchInfo *current_search_info =
+        (thread_search_info != nullptr) ? thread_search_info : search_info;
+    if (current_search_info != nullptr) {
+      current_search_info->cal_dist_time = 0;
+    }
     timeval tt1, tt2;
 
     VisitedList *vl = visited_list_pool_->getFreeVisitedList();
@@ -543,9 +552,15 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         }
       }
       gettimeofday(&tt2, NULL);
-      AccumulateTime(tt1, tt2, search_info->cal_dist_time);
+      // Use thread_local search_info for multithreaded queries
+      if (current_search_info != nullptr) {
+        AccumulateTime(tt1, tt2, current_search_info->cal_dist_time);
+      }
     }
-    search_info->total_comparison = num_search_comparison;
+    // Reuse current_search_info for total_comparison
+    if (current_search_info != nullptr) {
+      current_search_info->total_comparison = num_search_comparison;
+    }
 
     visited_list_pool_->releaseVisitedList(vl);
     return top_candidates;
@@ -815,7 +830,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
           "elements");
 
     delete visited_list_pool_;
-    visited_list_pool_ = new VisitedListPool(1, new_max_elements);
+    visited_list_pool_ = new VisitedListPool(32, new_max_elements);
 
     element_levels_.resize(new_max_elements);
 
@@ -947,7 +962,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
     std::vector<std::mutex>(max_update_element_locks)
         .swap(link_list_update_locks_);
 
-    visited_list_pool_ = new VisitedListPool(1, max_elements);
+    visited_list_pool_ = new VisitedListPool(32, max_elements);
 
     linkLists_ = (char **)malloc(sizeof(void *) * max_elements);
     if (linkLists_ == nullptr)
@@ -1510,8 +1525,11 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
 
         data = (unsigned int *)get_linklist(currObj, level);
         int size = getListCount(data);
-        metric_hops++;
-        metric_distance_computations += size;
+        // Disable metric collection in multithreaded queries to avoid atomic contention
+        #ifndef HNSW_MULTITHREAD_BENCHMARK
+          metric_hops++;
+          metric_distance_computations += size;
+        #endif
 
         tableint *datal = (tableint *)(data + 1);
         for (int i = 0; i < size; i++) {

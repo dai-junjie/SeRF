@@ -24,6 +24,35 @@ cmake ..
 make
 ```
 
+### Reproducibility benchmarks
+
+The repository also builds save/load and multi-threaded executables used by
+the GRAB-ANNS baseline evaluation:
+
+```text
+build/benchmark/serf_save_load
+build/benchmark/hnsw_save_load
+build/benchmark/serf_multithread
+build/benchmark/hnsw_multithread
+```
+
+Both multi-threaded executables accept the same dataset, index, search, and
+save/load arguments. For example:
+
+```bash
+OMP_NUM_THREADS=32 build/benchmark/serf_multithread \
+  -dataset deep -N 1000000 \
+  -dataset_path /path/to/deep_base.fvecs \
+  -query_path /path/to/deep_query.fvecs \
+  -index_k 32 -ef_con 400 -ef_max 500 \
+  -ef_search_list 16,32,64,128,256,512,1024,2048 \
+  -recursion_type MAX_POS -threads 32
+```
+
+Use `-save_index PATH` or `-load_index PATH` to separate index construction
+from query evaluation. HNSW uses the same interface without
+`-recursion_type`.
+
 Running example benchmark on DEEP dataset:
 
 ```bash

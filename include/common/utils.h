@@ -163,6 +163,15 @@ vector<int> greedyNearest(const vector<vector<float>> &dpts,
                           const vector<float> query, const int l_bound,
                           const int r_bound, const int k_smallest);
 
+// Batched multi-threaded version for groundtruth generation
+// Returns groundtruth for all queries, each query searches within the same range [l_bound, r_bound]
+// Results are mapped back to original node IDs
+vector<vector<int>> greedyNearestBatched(const vector<vector<float>> &dpts,
+                                         const vector<vector<float>> &queries,
+                                         const int l_bound,
+                                         const int r_bound,
+                                         const int k_smallest);
+
 void heuristicPrune(const vector<vector<float>> &nodes,
                     vector<pair<int, float>> &top_candidates, const size_t M);
 

@@ -319,3 +319,45 @@ vector<int> str2vec(const string str) {
   }
   return vect;
 }
+
+// Batched multi-threaded version for groundtruth generation
+// Processes multiple queries in parallel using OpenMP
+// Each query searches within the same range [l_bound, r_bound]
+vector<vector<int>> greedyNearestBatched(const vector<vector<float>> &dpts,
+                                         const vector<vector<float>> &queries,
+                                         const int l_bound,
+                                         const int r_bound,
+                                         const int k_smallest) {
+  const int num_queries = queries.size();
+  vector<vector<int>> results(num_queries);
+
+  // Parallel processing with OpenMP
+  #pragma omp parallel for schedule(dynamic)
+  for (int q = 0; q < num_queries; q++) {
+    std::priority_queue<std::pair<float, int>> top_candidates;
+    float lower_bound = _INT_MAX;
+
+    // Linear search within the specified range
+    for (int i = l_bound; i <= r_bound; i++) {
+      float dist = EuclideanDistanceSquare(queries[q], dpts[i]);
+      if (top_candidates.size() < k_smallest || dist < lower_bound) {
+        top_candidates.push(std::make_pair(dist, i));
+        if (top_candidates.size() > k_smallest) {
+          top_candidates.pop();
+        }
+        lower_bound = top_candidates.top().first;
+      }
+    }
+
+    // Extract results (already mapped to original node IDs)
+    vector<int> res;
+    while (!top_candidates.empty()) {
+      res.emplace_back(top_candidates.top().second);
+      top_candidates.pop();
+    }
+    std::reverse(res.begin(), res.end());
+    results[q] = res;
+  }
+
+  return results;
+}

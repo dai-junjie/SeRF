@@ -16,6 +16,9 @@ using std::pair;
 using std::string;
 using std::vector;
 
+// Forward declaration for helper function
+void SaveQueriesToFile(const string &query_path, const vector<vector<float>> &querys);
+
 class DataWrapper {
  public:
   DataWrapper(int num, int k_, string dataset_name, int data_size_)
@@ -48,7 +51,7 @@ class DataWrapper {
                                                    const string path = "");
   void generateHalfBoundedQueriesAndGroundtruth(bool is_save = false,
                                                 const string path = "");
-  void LoadGroundtruth(const string &gt_path);
+  void LoadGroundtruth(const string &gt_path, const string &query_path = "");
 
   void generateRangeFilteringQueriesAndGroundtruthScalability(
       bool is_save = false, const string path = "");
@@ -61,4 +64,9 @@ class DataWrapper {
 
   void generateRangeFilteringQueriesAndGroundtruthBenchmark(
       bool is_save_to_file, const string save_path = "");
+
+  // 生成不相交的固定大小范围查询（用于bucket-based场景）
+  void generatePartitionedQueriesAndGroundtruth(int num_partitions = 10,
+                                                 int queries_per_partition = 100,
+                                                 int window_size = 100);
 };
